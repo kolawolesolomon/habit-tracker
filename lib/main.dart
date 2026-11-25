@@ -1,40 +1,143 @@
+import 'dart:async';
 import 'dart:convert';
-import 'package:flutter/material.dart';
+
+import 'package:material_ui/material_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() => runApp(const MaterialApp(home: Habits()));
+
 class Habits extends StatefulWidget {
-  const Habits({super.key});
+  const Habits({super.key, this.now = DateTime.now});
+
+  final DateTime Function() now;
+
   @override
   State<Habits> createState() => _HabitsState();
 }
-class _HabitsState extends State<Habits> {
+
+class _HabitsState extends State<Habits> with WidgetsBindingObserver {
   final input = TextEditingController();
-  Map<String,String> habits = {};
+  Map<String, String> habits = {};
   SharedPreferences? prefs;
-  String get today => DateTime.now().toIso8601String().substring(0,10);
+  late String displayedDate = today;
+  Timer? dateCheck;
+
+  String get today => widget.now().toIso8601String().substring(0, 10);
+
   @override
-  void initState(){super.initState();load();}
-  Future<void> load() async {
-    final p=await SharedPreferences.getInstance();
-    if(!mounted)return;
-    setState((){prefs=p;habits=Map<String,String>.from(jsonDecode(p.getString('habits')??'{}'));});
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    dateCheck = Timer.periodic(
+      const Duration(minutes: 1),
+      (_) => refreshDate(),
+    );
+    load();
   }
-  void save(){prefs?.setString('habits',jsonEncode(habits));}
+
+  void refreshDate() {
+    final date = today;
+    if (date != displayedDate) {
+      setState(() => displayedDate = date);
+    }
+  }
+
   @override
-  void dispose(){input.dispose();super.dispose();}
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) refreshDate();
+  }
+
+  Future<void> load() async {
+    final preferences = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      prefs = preferences;
+      habits = Map<String, String>.from(
+        jsonDecode(preferences.getString('habits') ?? '{}'),
+      );
+    });
+  }
+
+  void save() {
+    prefs?.setString('habits', jsonEncode(habits));
+  }
+
+  void addHabit() {
+    final name = input.text.trim();
+    if (name.isEmpty || habits.containsKey(name)) return;
+    setState(() => habits[name] = '');
+    input.clear();
+    save();
+  }
+
   @override
-  Widget build(BuildContext context)=>Scaffold(
-    appBar:AppBar(title:const Text('Habit Tracker')),
-    body:prefs==null?const Center(child:CircularProgressIndicator()):Column(children:[
-      Padding(padding:const EdgeInsets.all(16),child:Row(children:[
-        Expanded(child:TextField(controller:input,decoration:const InputDecoration(labelText:'New habit'))),
-        IconButton(icon:const Icon(Icons.add),onPressed:(){final name=input.text.trim();if(name.isNotEmpty&&!habits.containsKey(name)){setState(()=>habits[name]='');input.clear();save();}})
-      ])),
-      Text('${habits.values.where((d)=>d==today).length} / ${habits.length} completed today'),
-      Expanded(child:ListView(children:habits.keys.map((name)=>CheckboxListTile(
-        title:Text(name),value:habits[name]==today,onChanged:(v){setState(()=>habits[name]=v==true?today:'');save();},
-        secondary:IconButton(icon:const Icon(Icons.delete_outline),onPressed:(){setState(()=>habits.remove(name));save();})
-      )).toList()))
-    ]));
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    dateCheck?.cancel();
+    input.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final date = displayedDate = today;
+    return Scaffold(
+      appBar: AppBar(title: const Text('Habit Tracker')),
+      body: prefs == null
+          ? const Center(child: CircularProgressIndicator())
+          : Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: input,
+                          decoration: const InputDecoration(
+                            labelText: 'New habit',
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Add habit',
+                        icon: const Icon(Icons.add),
+                        onPressed: addHabit,
+                      ),
+                    ],
+                  ),
+                ),
+                Text(
+                  '${habits.values.where((day) => day == date).length} / ${habits.length} completed today',
+                ),
+                Expanded(
+                  child: ListView(
+                    children: [
+                      for (final name in habits.keys)
+                        CheckboxListTile(
+                          key: ValueKey(name),
+                          title: Text(name),
+                          value: habits[name] == date,
+                          onChanged: (checked) {
+                            setState(
+                              () => habits[name] = checked == true ? today : '',
+                            );
+                            save();
+                          },
+                          secondary: IconButton(
+                            tooltip: 'Delete habit',
+                            icon: const Icon(Icons.delete_outline),
+                            onPressed: () {
+                              setState(() => habits.remove(name));
+                              save();
+                            },
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+    );
+  }
 }
